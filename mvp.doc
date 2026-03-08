@@ -1,0 +1,393 @@
+# BUILD SPECIFICATION (FINAL VERSION)
+
+# Project: Real-Time Sign → Sentence → Speech System
+
+## Backend: FastAPI (Python Only for Vision + AI)
+
+## Vision: MediaPipe + PyTorch
+
+## LLM: Groq (llama-3.1-8b-instant)
+
+## Minimum Vocabulary: **200 Signs**
+
+## Frontend: Next.js (UI + WebSocket + TTS Only)
+
+---
+
+# 1. CORE OBJECTIVE
+
+Build a real-time AI system that:
+
+1. Streams webcam frames to backend
+2. Detects hands using MediaPipe (Python)
+3. Classifies gestures using trained ML model (Python)
+4. Supports **minimum 200 distinct signs**
+5. Converts detected signs into tokens
+6. Uses Groq LLM to generate natural sentence
+7. Returns sentence to frontend
+8. Speaks sentence aloud
+
+Target latency:
+**Under 2 seconds end-to-end**
+
+---
+
+# 2. SYSTEM ARCHITECTURE
+
+```text
+Frontend Webcam
+      ↓ (WebSocket stream)
+FastAPI Backend
+      ↓
+MediaPipe Hand Detection
+      ↓
+Landmark Extraction (21 points)
+      ↓
+Gesture Classifier (200-class model)
+      ↓
+Server Token Buffer
+      ↓
+Groq LLM
+      ↓
+Sentence Response
+      ↓
+Frontend Display + Speech
+```
+
+---
+
+# 3. VOCABULARY REQUIREMENT (MANDATORY)
+
+## Minimum Supported Signs: 200
+
+### Categories Must Include:
+
+* Pronouns (I, YOU, HE, SHE, WE, THEY)
+* Common verbs (WANT, NEED, GO, HELP, EAT, DRINK, GIVE, TAKE, SEE, KNOW)
+* Emotions (HAPPY, SAD, ANGRY, TIRED)
+* Questions (WHAT, WHY, WHERE, WHEN, HOW)
+* Objects (WATER, FOOD, PHONE, MONEY, BOOK)
+* Time indicators (NOW, TODAY, TOMORROW, LATER)
+* Modifiers (MORE, LESS, VERY, PLEASE)
+* Yes/No
+* Numbers (0–20 minimum)
+
+System must not be limited to small demo vocabulary.
+
+---
+
+# 4. DATASET REQUIREMENTS (FOR 200 SIGNS)
+
+## Training Data Requirements
+
+For each of the 200 signs:
+
+* Minimum 500–1000 samples per sign
+* Multiple lighting conditions
+* Multiple hand sizes
+* Slight orientation variations
+* Background variation
+
+Minimum dataset size:
+
+```
+200 signs × 500 samples = 100,000 samples minimum
+```
+
+---
+
+# 5. VISION PIPELINE (PYTHON ONLY)
+
+## 5.1 Hand Detection
+
+File:
+
+```
+vision/hand_detector.py
+```
+
+Use:
+
+* MediaPipe Hands (Python)
+* max_num_hands = 1 (MVP)
+* min_detection_confidence = 0.7
+* min_tracking_confidence = 0.7
+
+Output:
+Normalized 21 landmarks:
+
+```
+21 × (x, y, z)
+```
+
+Coordinates must be:
+
+* Normalized
+* Centered relative to wrist
+* Scaled for consistency
+
+---
+
+# 6. GESTURE CLASSIFIER (200-CLASS MODEL)
+
+File:
+
+```
+vision/gesture_classifier.py
+```
+
+## Model Requirements
+
+* Input: 63 features (21 × 3)
+* Output: 200-class softmax
+* Framework: PyTorch (preferred)
+* Architecture:
+
+  * 2–3 fully connected layers
+  * BatchNorm
+  * Dropout
+  * ReLU
+* Output:
+
+  * label
+  * confidence score
+
+Example:
+
+```json
+{
+  "label": "WANT",
+  "confidence": 0.86
+}
+```
+
+---
+
+## Acceptance Rules
+
+* Accept only if confidence > 0.75
+* Require sustained detection (500ms)
+* Ignore low-confidence predictions
+
+Target accuracy:
+**≥ 80% across 200 signs**
+
+---
+
+# 7. TOKEN BUFFER (SERVER-SIDE)
+
+File:
+
+```
+vision/token_buffer.py
+```
+
+Responsibilities:
+
+* Prevent duplicate tokens
+* Append only if:
+
+  * Different from previous
+  * Stable detection (≥ 500ms)
+* Maintain ordered token list
+
+Expose:
+
+```python
+add_token(label: str)
+get_tokens()
+reset()
+```
+
+---
+
+# 8. GROQ LLM INTEGRATION
+
+File:
+
+```
+llm.py
+```
+
+## Model
+
+```
+llama-3.1-8b-instant
+```
+
+Reason:
+
+* Ultra low latency
+* High throughput
+* Suitable for real-time interaction
+
+---
+
+## Client Initialization
+
+Initialize once at startup:
+
+```python
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+```
+
+Never reinitialize per request.
+
+---
+
+## Prompt Design (Optimized for Speed)
+
+System prompt:
+
+```
+You convert sign language tokens into short, natural English sentences.
+Return only the final sentence.
+Be concise.
+```
+
+User prompt:
+
+```
+Tokens:
+I WANT WATER
+```
+
+---
+
+## Parameters
+
+* temperature = 0.2
+* max_tokens = 40
+* top_p = 0.9
+* stream = False
+
+Latency target:
+< 500ms per request
+
+---
+
+# 9. WEBSOCKET ENDPOINT
+
+Endpoint:
+
+```
+/ws
+```
+
+Responsibilities:
+
+1. Receive frame
+2. Decode image
+3. Run:
+
+   * Hand detection
+   * Gesture classification
+   * Token buffer
+4. If token list changes:
+
+   * Call Groq
+   * Send updated sentence
+5. Return:
+
+```json
+{
+  "tokens": ["I", "WANT"],
+  "sentence": "I would like some water."
+}
+```
+
+---
+
+# 10. FRONTEND RESPONSIBILITIES
+
+Frontend must:
+
+* Capture webcam
+* Send frames via WebSocket
+* Display live tokens
+* Display generated sentence
+* Use browser TTS
+* Provide:
+
+  * Start Camera button
+  * Reset button
+  * Speech toggle
+
+Frontend must NOT:
+
+* Perform ML inference
+* Store API keys
+* Run classification
+
+---
+
+# 11. PERFORMANCE TARGETS
+
+| Component        | Target  |
+| ---------------- | ------- |
+| Frame processing | < 50ms  |
+| Model inference  | < 10ms  |
+| Groq call        | < 500ms |
+| Total latency    | < 2 sec |
+
+System must remain responsive with 200-class model.
+
+---
+
+# 12. SCALABILITY REQUIREMENTS
+
+Must be designed to support:
+
+* Future expansion to 500+ signs
+* GPU inference container
+* Model retraining pipeline
+* Redis caching for LLM results
+* Horizontal scaling
+
+---
+
+# 13. SECURITY REQUIREMENTS
+
+* GROQ_API_KEY never exposed
+* Limit WebSocket frame size
+* Rate-limit frames per second
+* Validate image dimensions
+* Handle malformed payloads
+
+---
+
+# 14. COMPLETION CRITERIA
+
+System is complete when:
+
+* 200+ signs detectable
+* Model trained and loaded
+* Hand detection stable
+* Token buffer accurate
+* Groq generates correct sentences
+* Sentence spoken aloud
+* End-to-end latency under 2 seconds
+* No crashes under sustained usage
+
+---
+
+# FINAL BEHAVIOR EXAMPLE
+
+User signs:
+
+I / NEED / HELP
+
+Backend detects:
+
+```
+["I", "NEED", "HELP"]
+```
+
+Groq returns:
+
+"I need some help."
+
+Frontend:
+Displays sentence
+Speaks sentence
+
