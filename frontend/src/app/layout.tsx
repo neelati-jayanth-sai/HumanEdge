@@ -25,7 +25,7 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: "Human Edge",
+  title: "Sign Scribe",
   description: "Real-time sign language sentence generation and speech",
 };
 
